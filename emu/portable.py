@@ -394,11 +394,40 @@ def _dtpanel():
     return _panel_module('emu.dtpanel')
 
 
+def _tk_library_env(env, platform=None, prefix=None):
+    """macOS, from source: point TCL_LIBRARY and TK_LIBRARY at the base
+    Python's Tcl/Tk scripts when they are unset or wrong. -> env.
+
+    In a venv on a uv-managed (python-build-standalone) Python, Tcl looks for
+    init.tcl beside the venv's interpreter, where it is not, and Tk fails to
+    start in the panel and in the workers. Only the version tkinter was built
+    with is used. Nothing is written anywhere; the frozen app bundles its own
+    Tcl/Tk and is left alone, and so is every other platform."""
+    platform = sys.platform if platform is None else platform
+    if platform != 'darwin' or is_frozen():
+        return env
+    try:
+        import tkinter
+    except ImportError:
+        return env
+    prefix = sys.base_prefix if prefix is None else prefix
+    for var, name, marker in (
+            ('TCL_LIBRARY', 'tcl%s' % tkinter.TclVersion, 'init.tcl'),
+            ('TK_LIBRARY', 'tk%s' % tkinter.TkVersion, 'tk.tcl')):
+        if os.path.isdir(env.get(var) or ''):
+            continue
+        where = os.path.join(prefix, 'lib', name)
+        if os.path.isfile(os.path.join(where, marker)):
+            env[var] = where
+    return env
+
+
 def _ensure_import_path():
     """Workers chdir into the firmware folder; from source, keep the repo
     importable for the lazy imports that follow."""
     if not is_frozen() and REPO not in sys.path:
         sys.path.insert(0, REPO)
+    _tk_library_env(os.environ)
 
 
 # --- one firmware folder -------------------------------------------------------
@@ -463,6 +492,7 @@ def child_env(base=None):
     else:
         rest = env.get('PYTHONPATH')
         env['PYTHONPATH'] = REPO + (os.pathsep + rest if rest else '')
+        _tk_library_env(env)
     return env
 
 
